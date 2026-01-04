@@ -1,5 +1,5 @@
 [package]
-name = "hex-caster"
+name = "hex_caster"
 version = "0.2.0"
 edition = "2024"
 
@@ -27,3 +27,5 @@ embassy-usb-logger = "0.5.1"
 log = "0.4.29"
 embassy-usb = { version = "0.5.1", features = ["log"] }
 embassy-futures = { version = "0.1.2", features = ["log"] }
+embassy-sync = { version = "0.7.2", features = ["log"] }
+embedded-alloc = "0.7.0"
