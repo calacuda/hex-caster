@@ -5,14 +5,16 @@
 #![no_std]
 #![no_main]
 
-use cortex_m::prelude::_embedded_hal_blocking_delay_DelayMs;
+// #[macro_use]
+// extern crate alloc;
+
 use embassy_executor::Spawner;
 use embassy_rp::{
     peripherals::USB,
     usb::{Driver, InterruptHandler},
     {bind_interrupts, gpio},
 };
-use embassy_time::{Delay, Duration, Timer};
+use embassy_time::{Duration, Timer};
 use embassy_usb::{
     class::cdc_acm::{CdcAcmClass, State},
     {Builder, Config},
@@ -43,18 +45,32 @@ async fn main(spawner: Spawner) {
     // spawner.spawn(logger_task(driver)).unwrap();
     spawner.spawn(logger_task(driver)).unwrap();
 
-    let mut led = Output::new(p.PIN_25, Level::Low);
+    let led = Output::new(p.PIN_25, Level::Low);
+    spawner.spawn(blinky(led)).unwrap();
     // Delay::delay_ms(&mut embassy_time::Delay, 500_u32);
     Timer::after(Duration::from_millis(1000)).await;
 
     info!("Hello, World!");
+    // loop {
+    //     led.set_high();
+    //     debug!("on");
+    //     Timer::after_millis(250).await;
+    //
+    //     led.set_low();
+    //     debug!("off");
+    //     Timer::after_millis(250).await;
+    // }
+}
+
+#[embassy_executor::task]
+async fn blinky(mut led: Output<'static>) {
     loop {
         led.set_high();
-        debug!("on");
+        trace!("on");
         Timer::after_millis(250).await;
 
         led.set_low();
-        debug!("off");
+        trace!("off");
         Timer::after_millis(250).await;
     }
 }
@@ -106,7 +122,14 @@ async fn logger_task(driver: Driver<'static, USB>) {
         }
     );
     // log_fut.await
-    embassy_futures::join::join(log_fut, usb_fut).await;
+    // TODO: add other usb handling here
+    embassy_futures::join::join(
+        // futures that reutrn -> ()
+        embassy_futures::join::join_array([log_fut]),
+        // futures that reutrn -> !
+        embassy_futures::join::join_array([usb_fut]),
+    )
+    .await;
 }
 
 // #[embassy_executor::task]
