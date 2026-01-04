@@ -8,10 +8,7 @@
 #[macro_use]
 extern crate alloc;
 
-use alloc::{
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::string::{String, ToString};
 use embassy_executor::Spawner;
 use embassy_rp::{
     peripherals::USB,
@@ -174,7 +171,10 @@ async fn logger_task(driver: Driver<'static, USB>) {
             ::embassy_usb_logger::UsbLogger::with_custom_style(|record, writer| {
                 use core::fmt::Write;
                 let level = record.level().as_str();
-                if record.target().starts_with(env!("CARGO_PKG_NAME")) {
+                if record
+                    .target()
+                    .starts_with(&env!("CARGO_PKG_NAME").replace("-", "_"))
+                {
                     write!(writer, "[{level}] {}\r\n", record.args(),).unwrap();
                 } else {
                     // write!(writer, "[{level}] |{}|\r\n", env!("CARGO_PKG_NAME"),).unwrap();
