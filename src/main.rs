@@ -1,6 +1,10 @@
-//! This example test the RP Pico on board LED.
+//! This program launches application of the connected computer when the assisiated "Spell"
+//! (pattern) is drawn on the connected touch-pad
 //!
-//! It does not work with the RP Pico W board. See `blinky_wifi.rs`.
+//! I2C SCL => Green (GPIO pin 5)
+//! I2C SDA => Blue (GPIO pin 4)
+//! I2C interupt => Yellow (GPIO pin 3)
+//! button (click button) => Orange (GPIO pin 2)
 
 #![no_std]
 #![no_main]
@@ -11,9 +15,10 @@ extern crate alloc;
 use alloc::string::{String, ToString};
 use embassy_executor::Spawner;
 use embassy_rp::{
-    peripherals::USB,
-    usb::{Driver, InterruptHandler},
-    {bind_interrupts, gpio},
+    Peri, bind_interrupts, gpio,
+    i2c::InterruptHandler as I2cIrqHandler,
+    peripherals::{I2C0, PIN_4, PIN_5, USB},
+    usb::{Driver, InterruptHandler as UsbIrqHandler},
 };
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
 use embassy_time::{Duration, Timer};
@@ -46,8 +51,14 @@ fn init_heap() {
 }
 
 bind_interrupts!(struct Irqs {
-    USBCTRL_IRQ => InterruptHandler<USB>;
+    USBCTRL_IRQ => UsbIrqHandler<USB>;
+    I2C0_IRQ => I2cIrqHandler<I2C0>;
 });
+
+const ADDR: u8 = 0x2c;
+// the full report is 37 bytes long but we don't need that much data & the data is generated on
+// i2c reads so might as well save some time & only read what we need;
+const USB_HID_REPORT_SIZE: usize = 9;
 
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
@@ -85,25 +96,55 @@ async fn main(spawner: Spawner) {
     init_heap();
 
     let p = embassy_rp::init(Default::default());
+
+    // task for serial logging & other usb stuff
     let driver = Driver::new(p.USB, Irqs);
     // spawner.spawn(logger_task(driver)).unwrap();
     spawner.spawn(logger_task(driver)).unwrap();
 
+    // LED section
     let led = Output::new(p.PIN_25, Level::Low);
     spawner.spawn(blinky(led)).unwrap();
-    // Delay::delay_ms(&mut embassy_time::Delay, 500_u32);
+
+    // i2c read
+    let sda = p.PIN_4;
+    let scl = p.PIN_5;
+    // let config = embassy_rp::i2c::Config::default();
+    // let mut bus = embassy_rp::i2c::I2c::new_async(p.I2C0, scl, sda, Irqs, config);
+    spawner.spawn(trackpad_position(p.I2C0, sda, scl)).unwrap();
     Timer::after(Duration::from_millis(1000)).await;
 
     // info!("Hello, World!");
-    // loop {
-    //     led.set_high();
-    //     debug!("on");
-    //     Timer::after_millis(250).await;
-    //
-    //     led.set_low();
-    //     debug!("off");
-    //     Timer::after_millis(250).await;
-    // }
+    info!("all tasks started");
+}
+
+#[embassy_executor::task]
+async fn trackpad_position(
+    i2c: Peri<'static, I2C0>,
+    sda: Peri<'static, PIN_4>,
+    scl: Peri<'static, PIN_5>,
+) {
+    info!("starting I2C track pad task");
+    let config = embassy_rp::i2c::Config::default();
+    let mut bus = embassy_rp::i2c::I2c::new_async(i2c, scl, sda, Irqs, config);
+    let mut result: [u8; USB_HID_REPORT_SIZE] = [0u8; USB_HID_REPORT_SIZE];
+
+    loop {
+        match bus.read_async(ADDR, &mut result).await {
+            Ok(_) => {
+                // info!("report type = {}", result[2]);
+                let report_type = result[2];
+
+                if report_type == 1 {
+                    let x = u16::from_le_bytes([result[5], result[6]]);
+                    let y = u16::from_le_bytes([result[7], result[8]]);
+
+                    info!("({x}, {y})");
+                }
+            }
+            Err(e) => error!("could not read from i2c. attempt failed with error: {e:?}"),
+        }
+    }
 }
 
 #[embassy_executor::task]
@@ -111,10 +152,12 @@ async fn blinky(mut led: Output<'static>) {
     loop {
         led.set_high();
         trace!("on");
+        // debug!("on");
         Timer::after_millis(250).await;
 
         led.set_low();
         trace!("off");
+        // debug!("off");
         Timer::after_millis(250).await;
     }
 }
