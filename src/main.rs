@@ -84,6 +84,8 @@ impl ReceiverHandler for CmdHandler {
                     let name = &cmd[7..cmd.len()];
 
                     info!("Hello, {name}!");
+                } else if cmd.starts_with("/") {
+                    error!("unknown command!");
                 }
             }
             Err(e) => error!("messeage failed to parse with error: {e}. (likely invalid utf8)"),
