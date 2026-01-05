@@ -171,13 +171,12 @@ async fn logger_task(driver: Driver<'static, USB>) {
             ::embassy_usb_logger::UsbLogger::with_custom_style(|record, writer| {
                 use core::fmt::Write;
                 let level = record.level().as_str();
+
                 if record
                     .target()
                     .starts_with(&env!("CARGO_PKG_NAME").replace("-", "_"))
                 {
                     write!(writer, "[{level}] {}\r\n", record.args(),).unwrap();
-                } else {
-                    // write!(writer, "[{level}] |{}|\r\n", env!("CARGO_PKG_NAME"),).unwrap();
                 }
             });
         LOGGER.with_handler(CmdHandler::new());
@@ -198,34 +197,3 @@ async fn logger_task(driver: Driver<'static, USB>) {
     )
     .await;
 }
-
-// #[embassy_executor::task]
-// async fn logger_task(driver: Driver<'static, USB>) {
-//     // embassy_usb_logger::run!(1024, log::LevelFilter::Info, driver);
-//     // let class = CdcAcmClass::from(driver);
-//     // embassy_usb_logger::with_custom_style!(
-//     //     1024,
-//     //     log::LevelFilter::Info,
-//     //     // CdcAcmClass::new(, , 64),
-//     //     // class,
-//     //     |record, writer| {
-//     //         use core::fmt::Write;
-//     //         let level = record.level().as_str();
-//     //         write!(writer, "[{level}] {}\r\n", record.args()).unwrap();
-//     //     }
-//     // );
-//
-//     static LOGGER: ::embassy_usb_logger::UsbLogger<1024, ::embassy_usb_logger::DummyHandler> =
-//         ::embassy_usb_logger::UsbLogger::with_custom_style(|record, writer| {
-//             use core::fmt::Write;
-//             let level = record.level().as_str();
-//             write!(writer, "[{level}] {}\r\n", record.args()).unwrap();
-//         });
-//     unsafe {
-//         let _ = ::log::set_logger_racy(&LOGGER)
-//             .map(|()| log::set_max_level_racy(log::LevelFilter::Debug));
-//     }
-//     let _ = LOGGER
-//         .run(&mut ::embassy_usb_logger::LoggerState::new(), driver)
-//         .await;
-// }
