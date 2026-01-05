@@ -139,7 +139,7 @@ async fn trackpad_position(
                     let x = u16::from_le_bytes([result[5], result[6]]);
                     let y = u16::from_le_bytes([result[7], result[8]]);
 
-                    info!("({x}, {y})");
+                    // info!("({x}, {y})");
                 }
             }
             Err(e) => error!("could not read from i2c. attempt failed with error: {e:?}"),
