@@ -13,6 +13,7 @@ panic-probe = { version = "1.0", features = ["print-defmt"] }
 embassy-time = { version = "0.5.0" }
 embassy-rp = { version = "0.9.0", features = [
   "defmt",
+  "unstable-pac",
   "time-driver",
   "critical-section-impl",
   "rp235xa",
@@ -25,7 +26,8 @@ defmt-rtt = "1.1"
 splines = { version = "5.0.0", default-features = false, features = ["num-traits"] }
 embassy-usb-logger = "0.5.1"
 log = "0.4.29"
-embassy-usb = { version = "0.5.1", features = ["log"] }
 embassy-futures = { version = "0.1.2", features = ["log"] }
 embassy-sync = { version = "0.7.2", features = ["log"] }
 embedded-alloc = "0.7.0"
+embassy-usb = { version = "0.5.1", features = ["log"] }
+usbd-hid = "0.8.1"

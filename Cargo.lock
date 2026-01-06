@@ -750,6 +750,7 @@ dependencies = [
  "log",
  "panic-probe",
  "splines",
+ "usbd-hid",
 ]
 
 [[package]]
