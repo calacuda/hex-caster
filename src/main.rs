@@ -153,12 +153,12 @@ async fn trackpad_position(
 async fn blinky(mut led: Output<'static>) {
     loop {
         led.set_high();
-        trace!("on");
+        // trace!("on");
         // debug!("on");
         Timer::after_millis(250).await;
 
         led.set_low();
-        trace!("off");
+        // trace!("off");
         // debug!("off");
         Timer::after_millis(250).await;
     }
@@ -200,16 +200,6 @@ async fn logger_task(driver: Driver<'static, USB>) {
     // Run the USB device.
     let usb_fut = usb.run();
 
-    // let log_fut = embassy_usb_logger::with_custom_style!(
-    //     1024,
-    //     log::LevelFilter::Debug,
-    //     logger_class,
-    //     |record, writer| {
-    //         use core::fmt::Write;
-    //         let level = record.level().as_str();
-    //         write!(writer, "[{level}] {}\r\n", record.args()).unwrap();
-    //     }
-    // );
     #[allow(static_mut_refs)]
     let log_fut = unsafe {
         static mut LOGGER: ::embassy_usb_logger::UsbLogger<1024, CmdHandler> =
@@ -230,8 +220,6 @@ async fn logger_task(driver: Driver<'static, USB>) {
 
         LOGGER.create_future_from_class(logger_class)
     };
-
-    // log_fut.await
 
     // TODO: add other usb handling here
     embassy_futures::join::join(
