@@ -236,6 +236,26 @@ async fn spell_caster(
             spell_symbol.len()
         );
 
+        let report = KeyboardReport {
+            modifier: 0x08,
+            leds: 0,
+            reserved: 0,
+            keycodes: [0x28, 0, 0, 0, 0, 0],
+        };
+
+        kbd_sender.send(report).await;
+
+        Timer::after(Duration::from_millis(250)).await;
+
+        let report = KeyboardReport {
+            keycodes: [0, 0, 0, 0, 0, 0],
+            leds: 0,
+            modifier: 0,
+            reserved: 0,
+        };
+
+        kbd_sender.send(report).await;
+
         // TODO: match spell against corpus of learned spells
         // TODO: cast spell if known
         // TODO: display error if not.
@@ -366,8 +386,12 @@ async fn usb_task(
         loop {
             let report: KeyboardReport = kbd_shortcuts.receive().await;
 
+            info!("sending report: {report:?}");
+
             match writer.write_serialize(&report).await {
-                Ok(()) => {}
+                Ok(()) => {
+                    info!("report sent successfully");
+                }
                 Err(e) => warn!("Failed to send report: {:?}", e),
             };
         }
