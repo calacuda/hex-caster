@@ -13,15 +13,14 @@
 extern crate alloc;
 
 use crate::spell_caster::SpellBuilder;
-use alloc::{
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::{string::String, vec::Vec};
+use core::ptr::addr_of_mut;
 use core::sync::atomic::{AtomicBool, Ordering};
-use embassy_executor::Spawner;
+use embassy_executor::{Executor, Spawner};
 use embassy_rp::{
     Peri, bind_interrupts, gpio,
     i2c::InterruptHandler as I2cIrqHandler,
+    multicore::{Stack, spawn_core1},
     peripherals::{I2C0, PIN_4, PIN_5, USB},
     usb::{Driver, InterruptHandler as UsbIrqHandler},
 };
@@ -42,11 +41,13 @@ use embassy_usb_logger::ReceiverHandler;
 use embedded_alloc::LlffHeap as Heap;
 use gpio::{Level, Output};
 use log::*;
+use static_cell::StaticCell;
 use usbd_hid::descriptor::{KeyboardReport, SerializedDescriptor};
 
 use {defmt_rtt as _, panic_probe as _};
 
 pub mod spell_caster;
+pub mod spell_compare;
 
 // Program metadata for `picotool info`.
 // This isn't needed, but it's recomended to have these minimal entries.
@@ -65,6 +66,11 @@ fn init_heap() {
     static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
     unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
 }
+
+// static mut CORE1_STACK: Stack<4096> = Stack::new();
+static mut CORE1_STACK: Stack<5120> = Stack::new();
+static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
+static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
 
 bind_interrupts!(struct Irqs {
     USBCTRL_IRQ => UsbIrqHandler<USB>;
@@ -87,16 +93,23 @@ const HEAP_SIZE: usize = 128 * 1024;
 static COMMAND_CHANNEL: Channel<CriticalSectionRawMutex, String, 4> = Channel::new();
 static SPELL_CHANNEL: Channel<CriticalSectionRawMutex, Spell, 4> = Channel::new();
 static KBD_CHANNEL: Channel<CriticalSectionRawMutex, KeyboardReport, 4> = Channel::new();
+static LEARNING: AtomicBool = AtomicBool::new(false);
 
 pub enum KbdEvent {
-    Press(),
+    Press { scan_code: u8, is_mod: bool },
+    Release { scan_code: u8, is_mod: bool },
+    Wait(u32),
 }
 
-pub struct CmdHandler {}
+pub struct CmdHandler {
+    // learning_mode: Arc<AtomicBool>,
+}
 
 impl ReceiverHandler for CmdHandler {
     fn new() -> Self {
-        Self {}
+        Self {
+            // learning_mode: Arc::new(AtomicBool::default()),
+        }
     }
 
     async fn handle_data(&self, data: &[u8]) {
@@ -104,12 +117,15 @@ impl ReceiverHandler for CmdHandler {
             Ok(cmd) => {
                 info!("recv a command {cmd}");
                 // let mut buf = [0u8; 256];
-                COMMAND_CHANNEL.send(cmd.to_string()).await;
+                // COMMAND_CHANNEL.send(cmd.to_string()).await;
 
                 if cmd.starts_with("/greet ") {
                     let name = &cmd[7..cmd.len()];
-
                     info!("Hello, {name}!");
+                } else if cmd.starts_with("/learn") {
+                    LEARNING.store(true, Ordering::Relaxed);
+                    // Timer::after(Duration::from_millis(3000)).await;
+                    info!("entering learn mode");
                 } else if cmd.starts_with("/") {
                     error!("unknown command!");
                 }
@@ -198,6 +214,8 @@ async fn main(spawner: Spawner) {
 
     let p = embassy_rp::init(Default::default());
 
+    // let learning: Arc<AtomicBool> = Arc::new(false.into());
+
     // task for serial logging & other usb stuff
     let driver = Driver::new(p.USB, Irqs);
     // spawner.spawn(logger_task(driver)).unwrap();
@@ -215,9 +233,24 @@ async fn main(spawner: Spawner) {
     spawner
         .spawn(trackpad_position(p.I2C0, sda, scl, SPELL_CHANNEL.sender()))
         .unwrap();
-    spawner
-        .spawn(spell_caster(SPELL_CHANNEL.receiver(), KBD_CHANNEL.sender()))
-        .unwrap();
+    spawn_core1(
+        p.CORE1,
+        unsafe { &mut *addr_of_mut!(CORE1_STACK) },
+        move || {
+            let executor1 = EXECUTOR1.init(Executor::new());
+            executor1.run(|spawner| {
+                spawner
+                    .spawn(spell_caster(
+                        SPELL_CHANNEL.receiver(),
+                        KBD_CHANNEL.sender(),
+                        // learning,
+                    ))
+                    .unwrap()
+            })
+        },
+    )
+    // .unwrap();
+    ;
     Timer::after(Duration::from_millis(1000)).await;
 
     // info!("Hello, World!");
@@ -228,7 +261,10 @@ async fn main(spawner: Spawner) {
 async fn spell_caster(
     spell_cast_msg: Receiver<'static, CriticalSectionRawMutex, Spell, 4>,
     kbd_sender: Sender<'static, CriticalSectionRawMutex, KeyboardReport, 4>,
+    // learning: Arc<AtomicBool>,
 ) {
+    let mut spells = Vec::new();
+
     loop {
         let spell_symbol = spell_cast_msg.receive().await;
         debug!(
@@ -236,25 +272,43 @@ async fn spell_caster(
             spell_symbol.len()
         );
 
-        let report = KeyboardReport {
-            modifier: 0x08,
-            leds: 0,
-            reserved: 0,
-            keycodes: [0x28, 0, 0, 0, 0, 0],
-        };
+        if LEARNING.load(Ordering::Relaxed) {
+            spells.push(spell_symbol);
 
-        kbd_sender.send(report).await;
+            info!("learned a new spell!");
 
-        Timer::after(Duration::from_millis(250)).await;
+            LEARNING.store(false, Ordering::Relaxed);
+        } else {
+            info!("comparing spell to corpus");
 
-        let report = KeyboardReport {
-            keycodes: [0, 0, 0, 0, 0, 0],
-            leds: 0,
-            modifier: 0,
-            reserved: 0,
-        };
+            if let Some(spell) = spells.get(0) {
+                info!("comparing spell of len {}", spell.len());
 
-        kbd_sender.send(report).await;
+                let comp_value = spell_compare::spell_compare(&spell_symbol, &spell).await;
+
+                info!("comp_value {comp_value}");
+
+                let report = KeyboardReport {
+                    modifier: 0x08,
+                    leds: 0,
+                    reserved: 0,
+                    keycodes: [0x28, 0, 0, 0, 0, 0],
+                };
+
+                kbd_sender.send(report).await;
+
+                Timer::after(Duration::from_millis(250)).await;
+
+                let report = KeyboardReport {
+                    keycodes: [0, 0, 0, 0, 0, 0],
+                    leds: 0,
+                    modifier: 0,
+                    reserved: 0,
+                };
+
+                kbd_sender.send(report).await;
+            }
+        }
 
         // TODO: match spell against corpus of learned spells
         // TODO: cast spell if known
@@ -285,9 +339,9 @@ async fn trackpad_position(
                     let x = u16::from_le_bytes([result[5], result[6]]);
                     let y = u16::from_le_bytes([result[7], result[8]]);
 
-                    if (x + y) != 0 {
-                        info!("({x}, {y})");
-                    }
+                    // if (x + y) != 0 {
+                    //     debug!("({x}, {y})");
+                    // }
 
                     spell_builder.step((x, y));
 
@@ -322,6 +376,7 @@ async fn usb_task(
     // spawner: Spawner,
     driver: Driver<'static, USB>,
     kbd_shortcuts: Receiver<'static, CriticalSectionRawMutex, KeyboardReport, 4>,
+    // learning: Arc<AtomicBool>,
 ) {
     // Create embassy-usb Config
     let mut config = Config::new(0xc0de, 0xcafe);
@@ -386,11 +441,11 @@ async fn usb_task(
         loop {
             let report: KeyboardReport = kbd_shortcuts.receive().await;
 
-            info!("sending report: {report:?}");
+            // info!("sending report: {report:?}");
 
             match writer.write_serialize(&report).await {
                 Ok(()) => {
-                    info!("report sent successfully");
+                    debug!("report sent successfully");
                 }
                 Err(e) => warn!("Failed to send report: {:?}", e),
             };
@@ -411,7 +466,9 @@ async fn usb_task(
                     write!(writer, "[{level}] {}\r\n", record.args(),).unwrap();
                 }
             });
-        LOGGER.with_handler(CmdHandler::new());
+        LOGGER.with_handler(CmdHandler {
+            // learning_mode: learning,
+        });
         let _ = ::log::set_logger_racy(&LOGGER)
             .map(|()| log::set_max_level_racy(log::LevelFilter::Debug));
 
