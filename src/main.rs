@@ -282,11 +282,14 @@ async fn spell_caster(
             info!("comparing spell to corpus");
 
             if let Some(spell) = spells.get(0) {
-                info!("comparing spell of len {}", spell.len());
+                // info!("comparing spell of len {}", spell.len());
 
                 let comp_value = spell_compare::spell_compare(&spell_symbol, &spell).await;
-
                 info!("comp_value {comp_value}");
+
+                if comp_value > 0.15 || comp_value.is_nan() {
+                    continue;
+                }
 
                 let report = KeyboardReport {
                     modifier: 0x08,

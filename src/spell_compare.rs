@@ -12,26 +12,22 @@ pub async fn spell_compare(drawn: &Spell, against: &Spell) -> f32 {
     info!("about to compare");
     let line_differnece = do_spell_compare(drawn, compare).await;
     info!("line_diff = {line_differnece}");
-    let ar_diff = if compare_ar < drawn_ar {
-        compare_ar / drawn_ar
-    } else {
-        drawn_ar / compare_ar
-    };
+    let ar_diff = 1.0
+        - if compare_ar < drawn_ar {
+            compare_ar / drawn_ar
+        } else {
+            drawn_ar / compare_ar
+        };
 
-    info!("line_diff = {line_differnece}");
     info!("ar_diff = {ar_diff}");
 
-    (line_differnece + ar_diff) * 0.5
+    line_differnece * 0.8 + ar_diff * 0.2
 }
 
 pub async fn normalize(spell: &Spell) -> (NormedSpell, f32) {
     let min_x = spell.iter().min_by_key(|(x, _y)| x).unwrap_or(&(0, 0)).0;
-    // .iter()
-    // .fold(u16::MAX, |acc, (x, _y)| if *x < acc { *x } else { acc });
     let min_y = spell.iter().min_by_key(|(_x, y)| y).unwrap_or(&(0, 0)).1;
     info!("min_x: {min_x}, min_y: {min_y}");
-    // .iter()
-    // .fold(u16::MAX, |acc, (_x, y)| if *y < acc { *y } else { acc });
     let (w, h) = (
         (spell
             .iter()
@@ -63,16 +59,13 @@ async fn do_spell_compare(
     // drawn_ar: f32,
     // compare_ar: f32,
 ) -> f32 {
-    info!("len_1 = {}, len_2 = {}", drawn.len(), compare.len());
+    // info!("len_1 = {}, len_2 = {}", drawn.len(), compare.len());
     let len = (drawn.len() + compare.len()) / 2;
-    info!("len = {len}");
+    // info!("len = {len}");
 
     let (drawn, compare) = (resample(drawn, len).await, resample(compare, len).await);
-    info!("resample success");
+    // info!("resample success");
 
-    // let (drawn, compare) = ((drawn, len), resample(compare, len));
-
-    // (sum_squared_errors(drawn, compare) + (drawn_ar * compare_ar)) * 0.5
     sum_squared_errors(drawn, compare).await
 }
 
@@ -80,41 +73,41 @@ async fn resample(spell: NormedSpell, len: usize) -> NormedSpell {
     // let lerp = |start, end, t| start + t * (end - start);
 
     let futures = (0..len).map({
-        let ratio = spell.len() as f32 / len as f32;
+        let ratio = if spell.len() <= len {
+            spell.len() as f32 / len as f32
+        } else {
+            len as f32 / spell.len() as f32
+        };
         info!("ratio: {ratio}");
 
         move |i| {
             let percise_i = i as f32 * ratio;
-            // info!()
-            // if percise_i != 0.0 {
             let i_1 = percise_i.floor() as usize;
             let i_2 = percise_i.ceil() as usize;
+            // let i_1 = if i_1 >= spell.len() {
+            //     spell.len() - 1
+            // } else {
+            //     i_1
+            // };
+            let i_2 = if i_2 >= spell.len() {
+                spell.len() - 1
+            } else {
+                i_2
+            };
             let fract = percise_i.fract();
             let p_1 = spell[i_1];
-            // BUG: can error
             let p_2 = spell[i_2];
             do_resample(p_1, p_2, fract)
-            // } else {
-            //
-            // }
         }
     });
-    info!("futures made");
 
-    // futures.map().collect()
     let mut val = Vec::with_capacity(len);
 
-    for (i, fut) in futures.into_iter().enumerate() {
+    for fut in futures.into_iter() {
         let res = fut.await;
-
-        if i % 10 == 0 || i == len - 1 {
-            info!("({i} / {len}) {res:?}");
-        }
 
         val.push(res);
     }
-
-    info!("done");
 
     val
 }
@@ -131,10 +124,6 @@ async fn sum_squared_errors(spell_1: NormedSpell, spell_2: NormedSpell) -> f32 {
     sum / (squared_errors.len() as f32)
 }
 
-// async fn ident(id: (f32, f32)) -> (f32, f32) {
-//     id
-// }
-
 async fn do_resample(p_1: (f32, f32), p_2: (f32, f32), fract: f32) -> (f32, f32) {
     let lerp = |start, end, t| start + t * (end - start);
 
@@ -145,7 +134,4 @@ async fn do_resample(p_1: (f32, f32), p_2: (f32, f32), fract: f32) -> (f32, f32)
     let y = if y <= 1.0 { y } else { 1.0 };
 
     (x, y)
-    // } else {
-    //
-    // }
 }
