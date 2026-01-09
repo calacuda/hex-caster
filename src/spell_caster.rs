@@ -17,11 +17,11 @@ impl Default for SpellBuilder {
 
 impl SpellBuilder {
     pub fn step(&mut self, point: Point) {
-        self.last_point = point;
-
-        if point != (0, 0) {
+        if point != (0, 0) && point != self.last_point {
             self.points.push(point);
         }
+
+        self.last_point = point;
     }
 
     pub fn should_cast(&self) -> bool {

@@ -14,9 +14,12 @@ extern crate alloc;
 
 use crate::spell_caster::SpellBuilder;
 use alloc::{string::String, vec::Vec};
+use core::f32::INFINITY;
 use core::ptr::addr_of_mut;
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_executor::{Executor, Spawner};
+use embassy_rp::gpio::{Input, Pull};
+use embassy_rp::peripherals::PIN_3;
 use embassy_rp::{
     Peri, bind_interrupts, gpio,
     i2c::InterruptHandler as I2cIrqHandler,
@@ -90,10 +93,10 @@ const USB_HID_REPORT_SIZE: usize = 9;
 static HEAP: Heap = Heap::empty();
 const HEAP_SIZE: usize = 128 * 1024;
 
-static COMMAND_CHANNEL: Channel<CriticalSectionRawMutex, String, 4> = Channel::new();
+// static COMMAND_CHANNEL: Channel<CriticalSectionRawMutex, String, 4> = Channel::new();
 static SPELL_CHANNEL: Channel<CriticalSectionRawMutex, Spell, 4> = Channel::new();
 static KBD_CHANNEL: Channel<CriticalSectionRawMutex, KeyboardReport, 4> = Channel::new();
-static LEARNING: AtomicBool = AtomicBool::new(false);
+static LEARNING: AtomicBool = AtomicBool::new(true);
 
 pub enum KbdEvent {
     Press { scan_code: u8, is_mod: bool },
@@ -126,6 +129,10 @@ impl ReceiverHandler for CmdHandler {
                     LEARNING.store(true, Ordering::Relaxed);
                     // Timer::after(Duration::from_millis(3000)).await;
                     info!("entering learn mode");
+                } else if cmd.starts_with("/cast") {
+                    LEARNING.store(false, Ordering::Relaxed);
+                    // Timer::after(Duration::from_millis(3000)).await;
+                    info!("entering casting mode");
                 } else if cmd.starts_with("/") {
                     error!("unknown command!");
                 }
@@ -214,8 +221,6 @@ async fn main(spawner: Spawner) {
 
     let p = embassy_rp::init(Default::default());
 
-    // let learning: Arc<AtomicBool> = Arc::new(false.into());
-
     // task for serial logging & other usb stuff
     let driver = Driver::new(p.USB, Irqs);
     // spawner.spawn(logger_task(driver)).unwrap();
@@ -231,7 +236,13 @@ async fn main(spawner: Spawner) {
     let sda = p.PIN_4;
     let scl = p.PIN_5;
     spawner
-        .spawn(trackpad_position(p.I2C0, sda, scl, SPELL_CHANNEL.sender()))
+        .spawn(trackpad_position(
+            p.I2C0,
+            sda,
+            scl,
+            p.PIN_3,
+            SPELL_CHANNEL.sender(),
+        ))
         .unwrap();
     spawn_core1(
         p.CORE1,
@@ -273,44 +284,60 @@ async fn spell_caster(
         );
 
         if LEARNING.load(Ordering::Relaxed) {
+            info!("learned a new spell! (length {})", spell_symbol.len());
             spells.push(spell_symbol);
 
-            info!("learned a new spell!");
-
-            LEARNING.store(false, Ordering::Relaxed);
+            // LEARNING.store(false, Ordering::Relaxed);
         } else {
             info!("comparing spell to corpus");
 
-            if let Some(spell) = spells.get(0) {
-                // info!("comparing spell of len {}", spell.len());
+            // if let Some(spell) = spells.get(0) {
+            // info!("comparing spell of len {}", spell.len());
 
-                let comp_value = spell_compare::spell_compare(&spell_symbol, &spell).await;
-                info!("comp_value {comp_value}");
+            // let comp_value = spell_compare::spell_compare(&spell_symbol, &spell).await;
+            // info!("comp_value {comp_value}");
+            //
+            // if comp_value > 0.025 || comp_value.is_nan() {
+            //     continue;
+            // }
 
-                if comp_value > 0.15 || comp_value.is_nan() {
-                    continue;
-                }
+            let comparisons = spells
+                .iter()
+                .map(|spell| spell_compare::maybe_spell_compare(&spell_symbol, &spell));
+            let comp_value = spell_compare::collect_async(comparisons.collect())
+                .await
+                .into_iter()
+                .filter_map(|comp| comp)
+                .fold(INFINITY, |a, b| if a < b { a } else { b });
 
-                let report = KeyboardReport {
-                    modifier: 0x08,
-                    leds: 0,
-                    reserved: 0,
-                    keycodes: [0x28, 0, 0, 0, 0, 0],
-                };
+            info!("comp_value: {comp_value}");
 
-                kbd_sender.send(report).await;
-
-                Timer::after(Duration::from_millis(250)).await;
-
-                let report = KeyboardReport {
-                    keycodes: [0, 0, 0, 0, 0, 0],
-                    leds: 0,
-                    modifier: 0,
-                    reserved: 0,
-                };
-
-                kbd_sender.send(report).await;
+            // if comp_value < 0.025 && !comp_value.is_nan() {
+            if comp_value < 0.1 && !comp_value.is_nan() {
+                warn!("running short cut");
+                // let report = KeyboardReport {
+                //     modifier: 0x08,
+                //     leds: 0,
+                //     reserved: 0,
+                //     keycodes: [0x28, 0, 0, 0, 0, 0],
+                // };
+                //
+                // kbd_sender.send(report).await;
+                //
+                // Timer::after(Duration::from_millis(250)).await;
+                //
+                // let report = KeyboardReport {
+                //     keycodes: [0, 0, 0, 0, 0, 0],
+                //     leds: 0,
+                //     modifier: 0,
+                //     reserved: 0,
+                // };
+                //
+                // kbd_sender.send(report).await;
+            } else {
+                warn!("comparison failed");
             }
+            // }
         }
 
         // TODO: match spell against corpus of learned spells
@@ -324,6 +351,7 @@ async fn trackpad_position(
     i2c: Peri<'static, I2C0>,
     sda: Peri<'static, PIN_4>,
     scl: Peri<'static, PIN_5>,
+    interupt: Peri<'static, PIN_3>,
     spell_caster: Sender<'static, CriticalSectionRawMutex, Spell, 4>,
 ) {
     info!("starting I2C track pad task");
@@ -331,8 +359,13 @@ async fn trackpad_position(
     let mut bus = embassy_rp::i2c::I2c::new_async(i2c, scl, sda, Irqs, config);
     let mut result: [u8; USB_HID_REPORT_SIZE] = [0u8; USB_HID_REPORT_SIZE];
     let mut spell_builder = SpellBuilder::default();
+    let mut int_pin = Input::new(interupt, Pull::None);
+    // Enable the schmitt trigger to slightly debounce.
+    int_pin.set_schmitt(true);
 
     loop {
+        // int_pin.wait_for_low().await;
+
         match bus.read_async(ADDR, &mut result).await {
             Ok(_) => {
                 // info!("report type = {}", result[2]);
