@@ -8,13 +8,14 @@
 
 #![no_std]
 #![no_main]
+#![feature(more_float_constants)]
 
 #[macro_use]
 extern crate alloc;
 
 use crate::spell_caster::SpellBuilder;
-use alloc::{string::String, vec::Vec};
-use core::f32::INFINITY;
+use crate::spell_compare::process_stroke;
+use alloc::vec::Vec;
 use core::ptr::addr_of_mut;
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_executor::{Executor, Spawner};
@@ -72,7 +73,7 @@ fn init_heap() {
 
 // static mut CORE1_STACK: Stack<4096> = Stack::new();
 static mut CORE1_STACK: Stack<5120> = Stack::new();
-static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
+// static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
 static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
 
 bind_interrupts!(struct Irqs {
@@ -81,6 +82,7 @@ bind_interrupts!(struct Irqs {
 });
 
 pub type Point = (u16, u16);
+pub type SpellId = usize;
 pub type Spell = Vec<Point>;
 pub type KbdShortcut = Vec<KbdEvent>;
 
@@ -274,18 +276,27 @@ async fn spell_caster(
     kbd_sender: Sender<'static, CriticalSectionRawMutex, KeyboardReport, 4>,
     // learning: Arc<AtomicBool>,
 ) {
+    // will be a Vec<Vec<NormedSpell>> with each Vec<NormedSpell> representing a collection of
+    // examples of a spells.
     let mut spells = Vec::new();
 
     loop {
         let spell_symbol = spell_cast_msg.receive().await;
+
+        if spell_symbol.len() < 5 {
+            warn!("Gesture too short, ignoring");
+            continue;
+        }
+
         debug!(
             "spell_caster recieved a spell of length {}",
             spell_symbol.len()
         );
+        let cast_spell = process_stroke(spell_symbol).await;
 
         if LEARNING.load(Ordering::Relaxed) {
-            info!("learned a new spell! (length {})", spell_symbol.len());
-            spells.push(spell_symbol);
+            spells.push(cast_spell);
+            info!("learned a new spell! (spell no. {})", spells.len());
 
             // LEARNING.store(false, Ordering::Relaxed);
         } else {
@@ -301,19 +312,22 @@ async fn spell_caster(
             //     continue;
             // }
 
-            let comparisons = spells
-                .iter()
-                .map(|spell| spell_compare::maybe_spell_compare(&spell_symbol, &spell));
-            let comp_value = spell_compare::collect_async(comparisons.collect())
-                .await
-                .into_iter()
-                .filter_map(|comp| comp)
-                .fold(INFINITY, |a, b| if a < b { a } else { b });
+            // let comparisons = spells
+            //     .iter()
+            //     .map(|spell| spell_compare::maybe_spell_compare(&spell_symbol, &spell));
+            // let comp_value = spell_compare::collect_async(comparisons.collect())
+            //     .await
+            //     .into_iter()
+            //     .filter_map(|comp| comp)
+            //     .fold(f32::INFINITY, |a, b| if a < b { a } else { b });
+            //
+            // info!("comp_value: {comp_value}");
 
+            let (spell, comp_value) = spell_compare::spell_compare(cast_spell, &spells).await;
             info!("comp_value: {comp_value}");
 
             // if comp_value < 0.025 && !comp_value.is_nan() {
-            if comp_value < 0.1 && !comp_value.is_nan() {
+            if comp_value > 0.6 && !comp_value.is_nan() {
                 warn!("running short cut");
                 // let report = KeyboardReport {
                 //     modifier: 0x08,
@@ -337,7 +351,6 @@ async fn spell_caster(
             } else {
                 warn!("comparison failed");
             }
-            // }
         }
 
         // TODO: match spell against corpus of learned spells
