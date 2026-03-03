@@ -1,6 +1,6 @@
 // https://depts.washington.edu/acelab/proj/dollar/dollar.pdf
 
-use core::f32::consts::{PHI, PI};
+use core::f32::consts::{GOLDEN_RATIO as PHI, PI};
 
 use alloc::{borrow::ToOwned, vec::Vec};
 use log::*;
@@ -12,7 +12,7 @@ pub type NormedPoint = (f32, f32);
 pub type NormedSpell = Vec<(f32, f32)>;
 
 pub const THETA: f32 = PI / 4.0;
-pub const NEG_THETA: f32 = -1.0 * THETA;
+pub const NEG_THETA: f32 = -THETA;
 pub const THETA_DELTA: f32 = PI / 90.0;
 const N: usize = 64;
 const SIZE: f32 = 256.0;

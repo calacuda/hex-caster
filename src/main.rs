@@ -231,8 +231,10 @@ async fn main(spawner: Spawner) {
         .unwrap();
 
     // LED section
-    let led = Output::new(p.PIN_25, Level::Low);
-    spawner.spawn(blinky(led)).unwrap();
+    // let led = Output::new(p.PIN_25, Level::Low);
+    // spawner.spawn(blinky(led)).unwrap();
+
+    Timer::after(Duration::from_millis(2500)).await;
 
     // i2c read
     let sda = p.PIN_4;
@@ -264,10 +266,15 @@ async fn main(spawner: Spawner) {
     )
     // .unwrap();
     ;
-    Timer::after(Duration::from_millis(1000)).await;
+
+    // Timer::after(Duration::from_millis(5000)).await;
 
     // info!("Hello, World!");
     info!("all tasks started");
+
+    // LED section
+    let led = Output::new(p.PIN_25, Level::Low);
+    spawner.spawn(blinky(led)).unwrap();
 }
 
 #[embassy_executor::task]
@@ -281,6 +288,7 @@ async fn spell_caster(
     let mut spells = Vec::new();
 
     loop {
+        warn!("awaiting new spell");
         let spell_symbol = spell_cast_msg.receive().await;
 
         if spell_symbol.len() < 5 {
@@ -329,25 +337,25 @@ async fn spell_caster(
             // if comp_value < 0.025 && !comp_value.is_nan() {
             if comp_value > 0.6 && !comp_value.is_nan() {
                 warn!("running short cut");
-                // let report = KeyboardReport {
-                //     modifier: 0x08,
-                //     leds: 0,
-                //     reserved: 0,
-                //     keycodes: [0x28, 0, 0, 0, 0, 0],
-                // };
-                //
-                // kbd_sender.send(report).await;
-                //
-                // Timer::after(Duration::from_millis(250)).await;
-                //
-                // let report = KeyboardReport {
-                //     keycodes: [0, 0, 0, 0, 0, 0],
-                //     leds: 0,
-                //     modifier: 0,
-                //     reserved: 0,
-                // };
-                //
-                // kbd_sender.send(report).await;
+                let report = KeyboardReport {
+                    modifier: 0x08,
+                    leds: 0,
+                    reserved: 0,
+                    keycodes: [0x28, 0, 0, 0, 0, 0],
+                };
+
+                kbd_sender.send(report).await;
+
+                Timer::after(Duration::from_millis(250)).await;
+
+                let report = KeyboardReport {
+                    keycodes: [0, 0, 0, 0, 0, 0],
+                    leds: 0,
+                    modifier: 0,
+                    reserved: 0,
+                };
+
+                kbd_sender.send(report).await;
             } else {
                 warn!("comparison failed");
             }
@@ -391,10 +399,12 @@ async fn trackpad_position(
                     // if (x + y) != 0 {
                     //     debug!("({x}, {y})");
                     // }
+                    // debug!("step with point ({x}, {y})");
 
                     spell_builder.step((x, y));
 
                     if spell_builder.should_cast() {
+                        info!("casting...");
                         spell_caster.send(spell_builder.build()).await;
                         spell_builder.reset();
                     }

@@ -2,7 +2,7 @@ _:
   @just -l
 
 only-flash:
-  cargo run -r
+  cargo +nightly run -r
 
 mon port:
   rlwrap --always-readline --no-child --ansi-colour-aware picocom -cqb 115200 {{port}}
