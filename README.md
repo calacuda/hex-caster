@@ -9,7 +9,8 @@ HexCaster is designed to run on a Raspberry Pi Pico 2. It allows the user to dra
 
 ## Demo Video
 
-![Demo Gif](./assets/demo.gif)
+<!-- ![Demo Gif](./assets/demo.gif) -->
+<img src="./assets/demo.gif" alt="Demo GIF" width="100%" height="100%"/>
 
 ## How it Works
 
