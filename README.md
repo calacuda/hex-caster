@@ -1,3 +1,5 @@
+<img src="./assets/demo.gif" alt="Demo GIF" width="100%" height="100%"/>
+
 # Hex-Caster
 
 It's like a streamdeck but more magical.
@@ -6,10 +8,6 @@ HexCaster is designed to run on a Raspberry Pi Pico 2. It allows the user to dra
 
 - launch coresponding keyboard shorcuts or,
 - run a script on the connected computer.
-
-## Demo Video
-
-<img src="./assets/demo.gif" alt="Demo GIF" width="100%" height="100%"/>
 
 ## How it Works
 
